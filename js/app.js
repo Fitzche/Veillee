@@ -586,7 +586,7 @@ function effectEd(path, i, game) {
       <button class="icon small" data-act="edMove" data-p="${list}" data-i="${i}" title="Monter">↑</button><button class="icon small" data-act="edDel" data-p="${list}" data-i="${i}" title="Supprimer">✕</button></div>
     ${SEL(path + '.type', Object.fromEntries(Object.entries(RU.EFFECTS).map(([k, x]) => [k, x.l])))}
     ${meta.k === 't' ? F('S\'applique à', SEL(path + '.on', { target: 'La cible', actor: 'L\'acteur (ex. il meurt s\'il se trompe)' })) : ''}
-    ${val}${meta.k !== 'g' ? condEd(path + '.if', game, 'Si la cible') : ''}</div>`;
+    ${val}${condEd(path + '.if', game, meta.k === 'g' ? 'Si au moins une cible' : 'Si la cible')}</div>`;
 }
 
 function abilityEd(i, game) {

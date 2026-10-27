@@ -327,7 +327,15 @@ async function applyEffects(E, effects, targets, c) {
   for (const eff of effects) {
     if (E.s.winner) return;
     const kind = EFFECTS[eff.type]?.k;
-    if (kind === 'g') { if (!c.actor || test(E, eff.if, c.actor, c)) await effect(E, eff, null, c, targets); continue; }
+    if (kind === 'g') {
+      // Effet global : sa condition est remplie si au moins une cible la remplit (ou l'acteur, sans cible).
+      let ok = eff.if.k === 'always';
+      if (!ok && targets.length) ok = targets.some((t) => test(E, eff.if, t, { ...c, target: t }));
+      else if (!ok && c.actor) ok = test(E, eff.if, c.actor, c);
+      else if (!ok) ok = eff.if.k === 'chance' && test(E, eff.if, { f: {} }, c);
+      if (ok) await effect(E, eff, null, c, targets);
+      continue;
+    }
     const ts = targets.filter((t) => test(E, eff.if, t, c));
     if (kind === 'a') { if (ts.length || eff.type === 'learnCount') await effect(E, eff, null, c, ts); continue; }
     for (const t of ts) await effect(E, eff, eff.on === 'actor' ? c.actor : t, { ...c, target: t }, ts);
@@ -551,7 +559,7 @@ function effectText(e) {
   if (e.v && EFFECTS[e.type].v) s += e.type === 'setRole' ? ` (${e.v === '@chosen' ? 'rôle choisi' : rn(e.v)})` : e.type === 'convert' ? ` (${CAMPS[e.v] || e.v})` : e.type === 'win' ? '' : ` (${e.v})`;
   if (e.on === 'actor' && EFFECTS[e.type].k === 't') s = `l'acteur subit : ${s.toLowerCase()}`;
   const c = condText(e.if);
-  return s + (c ? ` si la cible ${c}` : '');
+  return s + (c ? (EFFECTS[e.type].k === 'g' ? ` si au moins une cible ${c}` : ` si la cible ${c}`) : '');
 }
 export function describeAbility(ab) {
   const when = ab.trigger === 'night' ? `${SCHEDULES[ab.sched].replace('N', ab.n)}` : TRIGGERS[ab.trigger].replace(/^\S+\s/, '');
