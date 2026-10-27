@@ -3,6 +3,7 @@
 // chaque information passe par lui et il peut corriger le grimoire à la main.
 import { register, getRole, roleName, allRoles } from './roles/index.js';
 import { shuffle, pick, chance, randInt, names } from './util.js';
+import { nightEntries, runAbilityAt, dayActions, fireDeath, fireExecuted, customWin } from './rules.js';
 
 const TEAM_FR = { townsfolk: 'Villageois', outsider: 'Étranger', minion: 'Sbire', demon: 'Démon', traveller: 'Voyageur' };
 const team = (p) => getRole(p.role)?.team;
@@ -32,7 +33,7 @@ export function impaired(E, p, skipDashii = false) {
   const f = p.f, c = E.s.clock;
   if (f.mjPoison || f.permPoison || f.permDrunk) return true;
   if (p.role === 'drunk' && p.seen !== 'drunk') return true;
-  if ((f.poison || 0) > c || (f.drunk || 0) > c) return true;
+  if ((f.poison || 0) > c || (f.drunk || 0) > c || (f.blockUntil || 0) > c) return true;
   if (!skipDashii && noDashiiVictims(E).includes(p)) return true;
   return false;
 }
@@ -77,8 +78,10 @@ function fakeNum(v, max) { const opts = []; for (let i = 0; i <= Math.max(max, 1
 // ---------- morts ----------
 function cantDie(E, t, cause) {
   if (!t.alive && !(t.role === 'zombuul' && t.f.fakeDead && !t.f.realDead)) return true;
-  const n = E.s.night;
+  const n = E.s.night, atNight = E.s.cursor.phase === 'night';
   if (t.f.safe === n && cause === 'demon') return true;
+  if (atNight && (t.f.shield === n || E.s.nd.peace)) return true;
+  if (atNight && getRole(t.role)?.custom && getRole(t.role).nightImmune) return true;
   if (t.f.innSafe === n && E.s.cursor.phase === 'night') return true;
   if (t.role === 'sailor' && sober(E, t)) return true;
   if (t.role === 'soldier' && sober(E, t) && cause === 'demon') return true;
@@ -88,6 +91,7 @@ function cantDie(E, t, cause) {
     if (nb.length === 2 && nb.every((x) => x.align !== 'evil') && nb.includes(t)) return true;
   }
   if (t.role === 'fool' && sober(E, t) && !t.f.foolUsed) { t.f.foolUsed = true; E.log(`${t.name} (Fou) échappe à la mort.`); return true; }
+  if (t.f.lives > 0) { t.f.lives--; E.log(`${t.name} perd une vie supplémentaire.`); return true; }
   return false;
 }
 
@@ -132,6 +136,7 @@ export async function die(E, t, cause, by) {
   }
   const r = getRole(t.f.phil || t.seen || t.role);
   if (r && r.death) await r.death(E, t, cause, night);
+  await fireDeath(E, t, cause, by);
 }
 
 async function execute(E, t) {
@@ -139,6 +144,7 @@ async function execute(E, t) {
   ds.executed = t.id;
   E.pub(`⚖️ ${t.name} est exécuté(e).`, 'exec');
   if (!t.alive && !(t.role === 'zombuul' && t.f.fakeDead)) { E.pub(`${t.name} était déjà mort(e).`); return; }
+  if (await fireExecuted(E, t) || s.winner) return;
   if (t.f.daSafe === s.day && E.inPlay('devils_advocate')) { E.pub(`… mais ${t.name} ne meurt pas.`); return; }
   if (t.align !== 'evil' && E.alive().some((x) => x.role === 'pacifist' && sober(E, x)) && chance(0.5)) { E.pub(`… mais ${t.name} ne meurt pas.`); return; }
   if (cantDie(E, t, 'exec')) { E.pub(`… mais ${t.name} ne meurt pas.`); return; }
@@ -780,7 +786,7 @@ export const botcMode = {
 
   deal(E) {
     const s = E.s, ps = E.seated();
-    const roles = shuffle(s.options.autoRoles ? autoRoles(E, ps.length) : s.roles.slice());
+    const roles = E.forcedSeats ? E.forcedSeats.slice() : shuffle(s.options.autoRoles ? autoRoles(E, ps.length) : s.roles.slice());
     s.g.script = [...new Set([...poolFor(E).map((r) => r.id), ...roles])];
     ps.forEach((p, i) => { p.role = roles[i]; p.seen = roles[i]; p.align = this.alignOf(E, p); });
     for (const p of ps) {
@@ -800,6 +806,7 @@ export const botcMode = {
       if (first && E.seated().length >= 7) { q.push({ o: 5, kind: 'minionInfo' }, { o: 6, kind: 'demonInfo' }); }
       for (const p of E.seated()) {
         const rid = p.f.phil || p.seen || p.role, r = getRole(rid);
+        if (r && r.abilities) { q.push(...nightEntries(E, p, r)); continue; }
         if (!r || !r.night) continue;
         const o = first ? r.first : r.other;
         if (o == null) continue;
@@ -814,6 +821,7 @@ export const botcMode = {
       if (e.kind === 'barber') return barber(E);
       const p = E.p(e.pid);
       if (!p) return;
+      if (e.k != null) return runAbilityAt(E, p, e.rid, e.k);
       const r = getRole(e.rid);
       const ok = p.alive || r.nightDead || p.f.vigor || (p.role === 'zombuul' && p.f.fakeDead);
       if (ok) await r.night(E, p, { first });
@@ -855,6 +863,8 @@ export const botcMode = {
 
   win(E) {
     const s = E.s;
+    const cw = customWin(E);
+    if (cw) return cw;
     const demons = E.seated().filter((x) => isDemon(x) && (x.alive || (x.role === 'zombuul' && x.f.fakeDead && !x.f.realDead)));
     const twin = E.seated().find((x) => x.role === 'evil_twin' && x.alive);
     const twinBlock = twin && E.p(twin.f.twin)?.alive;
@@ -873,10 +883,11 @@ export const botcMode = {
   actionsFor(E, p, ctl) {
     const s = E.s, ds = s.dayState, out = [];
     if (s.cursor.phase === 'day' && ds && !ds.ended) {
-      if (p.alive && !ds.nominators.includes(p.id) && !ds.voting && p.id !== s.stId)
+      if (p.alive && !ds.nominators.includes(p.id) && !ds.voting && p.id !== s.stId && s.g.noVoteDay !== s.day)
         out.push({ id: 'nominate', label: 'Nommer un joueur', pick: E.seated().filter((x) => !ds.nominees.includes(x.id)).map((x) => x.id) });
       const r = getRole(p.f.phil || p.seen || p.role);
       if (r && r.day && r.day.can(E, p) && !ds.voting) out.push({ id: 'ability', label: r.day.label });
+      if (!ds.voting) for (const d of dayActions(E, p)) out.push({ id: 'ability', k: d.k, label: d.label });
       if (ctl && !ds.voting) out.push({ id: 'endDay', label: ds.block ? `Fin du jour : exécuter ${E.p(ds.block).name}` : 'Fin du jour (personne sur le billot)', ctl: true });
     }
     return out;
@@ -886,6 +897,11 @@ export const botcMode = {
     const s = E.s, ds = s.dayState;
     if (s.cursor.phase !== 'day' || !ds || ds.ended) return;
     if (a.type === 'endDay' && ctl && !ds.voting) { ds.ended = true; E.changed(); return E.signal(); }
+    if (a.type === 'ability' && a.k != null) {
+      if (p.f.busy || !dayActions(E, p).some((d) => d.k === +a.k)) return;
+      p.f.busy = true; try { await runAbilityAt(E, p, p.seen || p.role, +a.k, { trigger: 'day' }); } finally { p.f.busy = false; }
+      E.checkWin(); E.changed(); return;
+    }
     if (a.type === 'ability') {
       const r = getRole(p.f.phil || p.seen || p.role);
       if (r && r.day && r.day.can(E, p) && !p.f.busy) { p.f.busy = true; try { await r.day.run(E, p); } finally { p.f.busy = false; } E.changed(); }
@@ -937,7 +953,7 @@ export const botcMode = {
   seenAlign(E, p) { const tm = seenTeam(p); return p.role === 'lunatic' ? 'evil' : (tm === 'minion' || tm === 'demon') ? 'evil' : p.align; },
 
   // pour les rôles sur mesure
-  attack: (E, by, t, cause) => attack(E, by, t, cause || 'ability'),
+  attack: (E, by, t, cause, force) => attack(E, by, t, cause || 'ability', !!force),
   lies, regEvil, real, impaired,
   protect(E, t) { t.f.safe = E.s.night; },
   poison(E, t) { t.f.poison = E.s.clock + 2; },
@@ -948,7 +964,7 @@ function threshold(E) { return Math.ceil(E.alive().length / 2); }
 
 async function vote(E, by, t) {
   const s = E.s, ds = s.dayState;
-  const voters = E.seated().filter((x) => x.alive || x.ghost);
+  const voters = E.seated().filter((x) => (x.alive || x.ghost) && !x.f.noVote && x.f.muteDay !== s.day);
   ds.voting = { by: by.id, target: t.id, done: [], total: voters.length };
   E.changed();
   const answers = await Promise.all(voters.map(async (v) => {
@@ -964,14 +980,16 @@ async function vote(E, by, t) {
   }).map(([v]) => v);
   for (const v of counted) if (!v.alive) v.ghost = false;
   if (counted.some(isDemon)) s.g.demonVoted = s.day;
-  const n = counted.length, th = threshold(E);
+  const weight = (v) => (v.f.weight && v.f.weight.day === s.day ? v.f.weight.n : getRole(v.role)?.passives?.voteWeight ?? 1);
+  const extra = s.g.extra && s.g.extra[t.id] && s.g.extra[t.id].day === s.day ? s.g.extra[t.id].n : 0;
+  const n = counted.reduce((a, v) => a + weight(v), 0) + extra, th = threshold(E);
   ds.noms.push({ by: by.id, target: t.id, yes: counted.map((v) => v.id), n });
   ds.voting = null;
   let res;
   if (n >= th && n > ds.top) { ds.block = t.id; ds.top = n; res = `${t.name} va sur le billot (${n} voix).`; }
   else if (n >= th && n === ds.top) { ds.block = null; res = `Égalité à ${n} voix : personne sur le billot.`; }
   else res = `${n} voix : pas assez.`;
-  E.pub(`🗳️ ${t.name} : ${n} OUI (${names(counted) || 'personne'}). ${res}`, 'vote');
+  E.pub(`🗳️ ${t.name} : ${n} voix (${names(counted) || 'personne'}${extra ? ` + ${extra} imposée(s)` : ''}). ${res}`, 'vote');
 }
 
 async function evilInfo(E, kind) {

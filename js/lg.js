@@ -1,10 +1,11 @@
 // Les Loups-Garous de Thiercelieux : jeu de base, Nouvelle Lune, Personnages / Le Village.
 import { register, getRole, roleName, allRoles } from './roles/index.js';
 import { shuffle, pick, chance, names } from './util.js';
+import { nightEntries, runAbilityAt, dayActions, fireDeath, fireExecuted, customWin } from './rules.js';
 
 const rn = roleName;
 export const isWolf = (p) => !!(p.f.wolf || getRole(p.role)?.wolf);
-const powers = (E, p) => !(E.s.g.noPowers && getRole(p.role)?.team === 'village');
+const powers = (E, p) => !(E.s.g.noPowers && getRole(p.role)?.team === 'village') && !((p.f.blockUntil || 0) > E.s.clock);
 
 const R = [];
 const def = (ed, team, id, name, icon, text, x = {}) => R.push({ game: 'lg', ed, team, id, name, icon, text, ...x });
@@ -184,7 +185,7 @@ async function lgDie(E, p, cause) {
   if (!p || !p.alive) return;
   const s = E.s;
   const r = getRole(p.role);
-  if (r.custom && r.extraLife && !p.f.lifeLost && cause !== 'chagrin') { p.f.lifeLost = true; E.log(`${p.name} perd sa vie supplémentaire.`); return; }
+  if (p.f.lives > 0 && cause !== 'chagrin' && cause !== 'lien') { p.f.lives--; E.log(`${p.name} perd une vie supplémentaire.`); return; }
   p.alive = false;
   p.dead = { cause, day: s.day, night: s.night };
   if (s.options.revealOnDeath && !p.f.hideRole) p.f.revealed = p.role;
@@ -207,7 +208,8 @@ async function lgDie(E, p, cause) {
     es.f.wolf = true; es.align = 'evil';
     await E.tell(es, 'Ton modèle est mort : tu deviens Loup-Garou et rejoins la meute.', { silent: true });
   }
-  const shooter = p.role === 'chasseur' && !s.g.noPowers || (r.custom && r.deathShot);
+  await fireDeath(E, p, cause);
+  const shooter = p.role === 'chasseur' && !s.g.noPowers;
   if (shooter && !E.s.winner) {
     const t = await E.choose1(p, { title: `${r.icon} ${r.name} : sur qui tires-tu en mourant ?` });
     if (t) { E.pub(`${r.icon} ${p.name} abat ${t.name} !`); await lgDie(E, t, 'chasseur'); }
@@ -217,15 +219,16 @@ async function lgDie(E, p, cause) {
 
 function lgImmune(E, t, cause) {
   if (t.f.safeN === E.s.night && cause === 'loups') return true;
+  if (t.f.shield === E.s.night && E.s.cursor.phase === 'night') return true;
   const r = getRole(t.role);
-  if (r.custom && r.nightImmune) return true;
+  if (r.custom && r.nightImmune && E.s.cursor.phase === 'night') return true;
   if (t.role === 'ancien' && cause === 'loups' && !t.f.hurt) { t.f.hurt = true; return true; }
   return false;
 }
 
 async function lgVote(E, title, opts = {}) {
   const s = E.s;
-  const voters = E.alive().filter((x) => !x.f.noVote);
+  const voters = E.alive().filter((x) => !x.f.noVote && x.f.muteDay !== s.day);
   s.dayState.voting = { done: [], total: voters.length, title };
   E.changed();
   const res = await Promise.all(voters.map(async (v) => {
@@ -238,12 +241,15 @@ async function lgVote(E, title, opts = {}) {
   const lines = [];
   for (const [v, t] of res) {
     if (!t) continue;
-    const w = s.options.captain && s.g.captain === v.id && !opts.noCaptain ? 2 : 1;
+    let w = s.options.captain && s.g.captain === v.id && !opts.noCaptain ? 2 : 1;
+    if (!opts.noCaptain) w *= v.f.weight && v.f.weight.day === s.day ? v.f.weight.n : getRole(v.role)?.passives?.voteWeight ?? 1;
+    if (!w) continue;
     tally[t] = (tally[t] || 0) + w;
     lines.push(`${v.name} → ${E.p(t).name}${w > 1 ? ' (×2)' : ''}`);
   }
   const cb = s.g.corbeau;
   if (cb && cb.day === s.day && opts.corbeau && E.p(cb.id)?.alive) tally[cb.id] = (tally[cb.id] || 0) + 2;
+  if (opts.corbeau) for (const [id, x] of Object.entries(s.g.extra || {})) if (x.day === s.day && E.p(id)?.alive) tally[id] = (tally[id] || 0) + x.n;
   E.pub(`🗳️ ${title} — ${lines.join(' · ') || 'que des votes blancs'}`, 'vote');
   const max = Math.max(0, ...Object.values(tally));
   if (!max) return null;
@@ -271,6 +277,7 @@ async function eliminate(E, t) {
     t.f.noVote = true; t.f.revealed = 'idiot';
     return E.pub(`🤡 ${t.name} est l'Idiot du village : il est épargné, mais ne votera plus.`);
   }
+  if (await fireExecuted(E, t) || s.winner) return;
   const sv = E.alive().find((x) => x.role === 'servante' && x !== t && !(s.g.lovers || []).includes(x.id));
   if (sv && powers(E, sv) && await E.yesno(sv, 'Servante dévouée', `${t.name} va mourir. Prendre son rôle en secret ?`)) {
     const r = t.role;
@@ -323,8 +330,8 @@ export const lgMode = {
 
   deal(E) {
     const s = E.s, ps = E.seated();
-    let roles = shuffle(s.options.autoRoles ? autoRoles(E, ps.length) : s.roles.slice());
-    if (roles.includes('voleur') && roles.length >= ps.length + 2) {
+    let roles = E.forcedSeats ? E.forcedSeats.slice() : shuffle(s.options.autoRoles ? autoRoles(E, ps.length) : s.roles.slice());
+    if (!E.forcedSeats && roles.includes('voleur') && roles.length >= ps.length + 2) {
       roles = roles.filter((r) => r !== 'voleur');
       roles = shuffle(roles);
       s.g.center = roles.splice(ps.length - 1, 2);
@@ -345,9 +352,10 @@ export const lgMode = {
       const nd = s.nd;
       Object.assign(nd, { wolfVictim: null, saved: false, infect: false, kills: [] });
       const q = [];
-      for (const p of E.alive()) {
+      for (const p of E.seated()) {
         const r = getRole(p.role);
-        if (!r || !r.night || !powers(E, p)) continue;
+        if (r && r.abilities) { if (powers(E, p)) q.push(...nightEntries(E, p, r)); continue; }
+        if (!p.alive || !r || !r.night || !powers(E, p)) continue;
         const o = first ? r.first : r.other;
         if (o == null) continue;
         if (first && r.first == null) continue;
@@ -359,6 +367,7 @@ export const lgMode = {
     }, async (e) => {
       if (e.kind === 'wolves') return wolvesStep(E);
       const p = E.p(e.pid);
+      if (e.k != null) return p && runAbilityAt(E, p, e.rid, e.k);
       if (!p || !p.alive) return;
       await getRole(e.rid).night(E, p, { first });
     });
@@ -386,6 +395,7 @@ export const lgMode = {
       }
       s.g.rust = null;
     }
+    if (nd.peace) { const kept = deaths.filter(([d]) => nd.kills.some((k) => k.id === d.id && k.force)); deaths.splice(0, deaths.length, ...kept); }
     if (!deaths.length) E.pub('☀️ Le village se réveille. Personne n\'est mort cette nuit !', 'day');
     else E.pub(`☀️ Le village se réveille. Cette nuit, ${names(deaths.map(([d]) => d))} ${deaths.length > 1 ? 'ont péri' : 'a péri'}.`, 'day');
     for (const [d, c] of deaths) { await lgDie(E, d, c); if (s.winner) return; }
@@ -410,10 +420,16 @@ export const lgMode = {
       if (t) { s.g.captain = t.id; E.pub(`👑 ${t.name} est élu(e) Capitaine.`); }
       ds.stage = 'talk';
     }
+    if (s.g.noVoteDay === s.day) E.pub('🙊 Pas de vote aujourd\'hui.');
     while (ds.stage === 'talk' && !s.winner) await E.waitSignal();
     if (s.winner) return;
+    if (s.g.noVoteDay === s.day) { ds.stage = 'done'; return; }
     const t = await lgVote(E, 'Vote du village', { corbeau: true });
     await eliminate(E, t);
+    if (s.g.doubleVoteDay === s.day && !s.winner && !E.checkWin()) {
+      E.pub('✌️ Second vote de la journée !');
+      await eliminate(E, await lgVote(E, 'Second vote du village'));
+    }
     if (!s.g.firstVoteDone) {
       s.g.firstVoteDone = true;
       for (const a of E.alive().filter((x) => x.role === 'ange')) { a.role = 'villageois'; a.seen = 'villageois'; a.align = 'good'; await E.tell(a, 'Tu as survécu au premier vote : tu deviens Simple Villageois.', { silent: true }); }
@@ -432,6 +448,8 @@ export const lgMode = {
   win(E) {
     const s = E.s, A = E.alive();
     if (!A.length) return { team: 'none', text: 'Tout le monde est mort : personne ne gagne.' };
+    const cw = customWin(E);
+    if (cw) return cw;
     const L = s.g.lovers;
     if (L && A.length === 2 && L.every((id) => E.p(id).alive)) return { team: 'lovers', text: `Les amoureux (${names(L.map((id) => E.p(id)))}) sont les derniers survivants : l'amour triomphe !` };
     const fl = A.find((x) => x.role === 'flutiste');
@@ -443,8 +461,8 @@ export const lgMode = {
     }
     const lb = A.find((x) => x.role === 'loup_blanc');
     if (lb && A.length === 1) return { team: 'solo', text: `Le Loup-Garou Blanc (${lb.name}) est le dernier survivant : il gagne seul !` };
-    const customSolo = A.find((x) => getRole(x.role)?.custom && getRole(x.role).team === 'solo');
-    if (customSolo && A.length === 1) return { team: 'solo', text: `${customSolo.name} (${rn(customSolo.role)}) est le dernier survivant : il gagne seul !` };
+
+
     const wolves = A.filter(isWolf);
     const solos = A.filter((x) => getRole(x.role).team === 'solo' && !(x.role === 'ange'));
     if (!wolves.length && !solos.length) return { team: 'good', text: 'Tous les loups sont morts : le village l\'emporte !' };
@@ -456,11 +474,18 @@ export const lgMode = {
 
   actionsFor(E, p, ctl) {
     const s = E.s, ds = s.dayState, out = [];
-    if (s.cursor.phase === 'day' && ds && ds.stage === 'talk' && ctl) out.push({ id: 'startVote', label: 'Lancer le vote du village', ctl: true });
+    if (s.cursor.phase === 'day' && ds && ds.stage === 'talk') {
+      for (const d of dayActions(E, p)) out.push({ id: 'ability', k: d.k, label: d.label });
+      if (ctl) out.push({ id: 'startVote', label: s.g.noVoteDay === s.day ? 'Passer à la nuit' : 'Lancer le vote du village', ctl: true });
+    }
     return out;
   },
   async action(E, p, a, ctl) {
     const ds = E.s.dayState;
+    if (a.type === 'ability' && ds && ds.stage === 'talk' && !p.f.busy && dayActions(E, p).some((d) => d.k === +a.k)) {
+      p.f.busy = true; try { await runAbilityAt(E, p, p.role, +a.k, { trigger: 'day' }); } finally { p.f.busy = false; }
+      E.checkWin(); E.changed(); return;
+    }
     if (a.type === 'startVote' && ctl && ds && ds.stage === 'talk') { ds.stage = 'vote'; E.changed(); E.signal(); }
   },
   dayView(E) {
@@ -486,7 +511,11 @@ export const lgMode = {
   seenAlign(E, p) { return alignOf(p); },
 
   // pour les rôles sur mesure
-  attack(E, by, t) { E.s.nd.kills && E.s.nd.kills.push({ id: t.id, cause: 'pouvoir' }); return true; },
+  async attack(E, by, t, cause, force) {
+    if (E.s.cursor.phase === 'night') { E.s.nd.kills.push({ id: t.id, cause: 'pouvoir', force: !!force }); return true; }
+    if (!force && lgImmune(E, t, 'pouvoir')) return false;
+    await lgDie(E, t, 'pouvoir'); return true;
+  },
   lies: () => false,
   regEvil: (E, t) => { const r = getRole(t.role); return r?.custom && r.appears ? r.appears === 'evil' : isWolf(t); },
   real: (E, p) => powers(E, p),

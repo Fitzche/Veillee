@@ -9,8 +9,19 @@ Un joueur crée la partie, les autres entrent le code à 5 lettres. Marche aussi
 - **Toutes les décisions sur son propre téléphone** : actions de nuit, votes, nominations, pouvoirs de jour.
 - **Rôles** : BotC Trouble Brewing, Bad Moon Rising, Sects & Violets (72 personnages) ;
   Loups-Garous jeu de base, Nouvelle Lune, Personnages & Village (31 rôles).
-- **Rôles sur mesure** : éditeur intégré (camp, pouvoir de nuit, ordre de réveil, particularités),
-  partage par un code `VEIL1:…` à coller chez un ami.
+- **Atelier — rôles sur mesure** : un rôle combine des particularités (immunités, vies, poids de la voix,
+  camp apparent…) et jusqu'à 8 capacités. Chaque capacité a un déclencheur (nuit, bouton de jour, chaque matin,
+  à sa mort, à la mort d'un autre, quand le village l'élimine), des conditions (utilisations, repos, chance,
+  vivant/mort…), des cibles (choisies, au hasard, voisins, porteurs d'une étiquette, un camp, son meurtrier…)
+  et une suite d'effets conditionnels (tuer, protéger, enquêter, étiqueter, lier, convertir, changer de rôle,
+  bloquer, faire taire, voix en plus, victoire…). Conditions de victoire propres comprises.
+- **Atelier — événements** : chaque événement a une chance d'apparaître dans la partie (ex. 30 %), frappe au
+  matin ou au crépuscule d'une nuit précise, d'une nuit tirée au hasard ou chaque nuit avec une probabilité,
+  et applique les mêmes effets que les rôles (épidémie, trêve, pleine lune, grand procès…).
+- Rôles et événements se partagent par un code `VEIL1:…` à coller chez un ami.
+- **Laboratoire** : parties artificielles sur un seul appareil. On impose les rôles siège par siège, on joue
+  n'importe quel joueur (les autres sont des bots), on voit le grimoire complet ; ou on simule des centaines de
+  parties d'un coup pour vérifier qu'un rôle ne plante pas et voir qui gagne.
 
 ## Comment ça marche
 
@@ -21,6 +32,14 @@ Le service public gratuit de PeerJS sert uniquement à mettre les appareils en r
 et les autres se reconnectent tout seuls.
 
 Il faut Internet (4G ou Wi-Fi) sur chaque appareil.
+
+## Mises à jour
+
+Chaque ouverture de l'appli récupère la dernière version publiée (rien à réinstaller). Si une nouvelle
+version sort pendant qu'elle est ouverte, un bandeau « Mettre à jour » apparaît. Si un joueur a une version
+différente de celle de l'hôte, l'hôte le voit dans le salon (⚠️) et le joueur reçoit un bandeau pour recharger.
+
+Pour publier : `node tools/bump.mjs 1.2.0` (change le numéro de version), puis commit et push sur `main`.
 
 ## La mettre en ligne (pour l'envoyer à ses potes)
 
@@ -54,7 +73,8 @@ node tools/sim.mjs 300
 ```
 
 Joue 300 parties complètes avec des bots qui répondent au hasard (les deux jeux, toutes les
-extensions, avec et sans MJ, composition auto et manuelle, rôles sur mesure). Sort en erreur si une
+extensions, avec et sans MJ, composition auto et manuelle, modèles de rôles et d'événements, plus des rôles
+et événements générés au hasard pour éprouver le moteur de règles). Sort en erreur si une
 partie plante ou se bloque.
 
 ## Ce que le conteur automatique simplifie (sans MJ)
@@ -73,7 +93,10 @@ et personnages expérimentaux de BotC — les rôles sur mesure servent à combl
 | --- | --- |
 | `js/engine.js` | joueurs, invites, messages, boucle nuit/jour, vue filtrée par joueur |
 | `js/botc.js`, `js/lg.js` | règles, rôles et déroulé de chaque jeu |
-| `js/roles/custom.js` | compilation des rôles sur mesure |
+| `js/rules.js` | moteur des rôles sur mesure et des événements (déclencheurs, cibles, effets, victoires) |
+| `js/roles/custom.js` | compilation et partage des rôles / événements |
+| `js/simcore.js` | parties artificielles (laboratoire et `tools/sim.mjs`) |
+| `js/version.js` | numéro de version (`node tools/bump.mjs X.Y.Z`) |
 | `js/net.js` | connexions hôte / joueurs |
 | `js/app.js` | interface |
 | `sw.js`, `manifest.webmanifest` | installation et fonctionnement hors ligne de l'interface |

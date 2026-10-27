@@ -3,6 +3,7 @@
 import { MODES } from './modes.js';
 import { getRole, roleName, installCustom } from './roles/index.js';
 import { uid, shuffle, pick, chance } from './util.js';
+import { rollEvents, fireDusk, fireDawn } from './rules.js';
 
 export function newState(code, host) {
   return {
@@ -11,7 +12,8 @@ export function newState(code, host) {
     players: [mkPlayer(host, 0)],
     roles: [],            // ids choisis (doublons possibles pour LG)
     custom: [],           // définitions de rôles sur mesure apportées par l'hôte
-    options: { autoRoles: true, stValidates: true, revealOnDeath: true, captain: true, fakeActions: true, dayMinutes: 0 },
+    events: [],           // événements sur mesure (chacun a sa probabilité d'apparaître)
+    options: { autoRoles: true, stValidates: true, revealOnDeath: true, captain: true, fakeActions: true, dayMinutes: 0, announceEvents: true },
     day: 0, night: 0, clock: 0,
     cursor: null, nightQ: [], nightI: 0, nd: {}, dayState: null,
     pub: [], log: [], prompts: {}, winner: null, bluffs: [], g: {},
@@ -163,6 +165,7 @@ export class Engine {
     const n = this.seated().length;
     const M = this.mode;
     if (n < M.min) return `Il faut au moins ${M.min} joueurs (hors MJ).`;
+    if (this.forcedSeats) return this.forcedSeats.length === n ? null : 'Un rôle par joueur, svp.';
     if (!this.s.options.autoRoles) {
       const err = M.checkRoles(this, this.s.roles);
       if (err) return err;
@@ -175,10 +178,11 @@ export class Engine {
     installCustom(s.custom);
     s.phase = 'game';
     s.seat = 0;
-    const seated = shuffle(this.seated());
+    const seated = this.forcedSeats ? this.seated() : shuffle(this.seated());
     seated.forEach((p, i) => { p.seat = i; p.alive = true; p.ghost = true; p.notes = []; p.f = {}; p.dead = null; });
     s.pub = []; s.log = []; s.winner = null; s.day = 0; s.night = 0; s.g = {}; s.nd = {};
     this.mode.deal(this);
+    rollEvents(this);
     this.log('Distribution : ' + this.seated().map((p) => `${p.name}=${this.rn(p.role)}${p.seen && p.seen !== p.role ? ` (croit ${this.rn(p.seen)})` : ''}`).join(', '));
     s.cursor = { phase: this.mode.startsWithDay && this.mode.startsWithDay(this) ? 'day' : 'night' };
     if (s.cursor.phase === 'night') { s.night = 1; s.clock = 2; s.nightQ = null; } else { s.day = 0; s.clock = 1; }
@@ -196,9 +200,12 @@ export class Engine {
           if (s.winner || s.phase !== 'game') break;
           if (this.mode.dawn) await this.mode.dawn(this);
           if (s.winner || s.phase !== 'game') break;
+          // Le matin appartient déjà au jour : les événements de l'aube tuent immédiatement.
+          s.day = s.night; s.clock = s.night * 2 + 1; s.cursor = { phase: 'day' }; s.dayState = null;
+          await fireDawn(this);
+          if (s.winner || s.phase !== 'game') break;
           this.checkWin();
           if (s.winner) break;
-          s.day = s.night; s.clock = s.night * 2 + 1; s.cursor = { phase: 'day' }; s.dayState = null;
           this.changed();
         } else {
           await this.mode.day(this);
@@ -262,6 +269,7 @@ export class Engine {
       this.pub(`🌙 Nuit ${s.night}. Tout le monde ferme les yeux.`, 'night');
       if (s.options.fakeActions) this.fakeActions();
     }
+    if (!s.nd.duskDone) { s.nd.duskDone = true; await fireDusk(this); if (s.winner) return; }
     while (s.nightI < s.nightQ.length) {
       const e = s.nightQ[s.nightI];
       const p = e.pid && this.p(e.pid);
@@ -342,10 +350,10 @@ export class Engine {
     const v = {
       code: s.code, mode: s.mode, phase: s.phase, day: s.day, night: s.night,
       cursor: s.cursor, hostId: s.hostId, stId: s.stId, winner: s.winner,
-      options: s.options, roles: s.roles, custom: s.custom,
+      options: s.options, roles: s.roles, custom: s.custom, events: s.events,
       pub: s.pub.slice(-80),
       players: s.players.slice().sort((a, b) => a.seat - b.seat).map((p) => ({
-        id: p.id, name: p.name, seat: p.seat, alive: p.alive, ghost: p.ghost, connected: p.connected,
+        id: p.id, name: p.name, seat: p.seat, alive: p.alive, ghost: p.ghost, connected: p.connected, ver: p.v,
         st: p.id === s.stId,
         shown: end || isST ? p.role : (p.f.revealed ? p.f.revealed : null),
         tags: this.mode.publicTags ? this.mode.publicTags(this, p) : [],
@@ -361,12 +369,16 @@ export class Engine {
       dayState: s.dayState ? this.mode.dayView(this, me) : null,
       actions: me && s.phase === 'game' ? this.mode.actionsFor(this, me, isHost && !s.stId || isST) : [],
     };
-    if (isST || end) {
-      v.grim = {
-        players: this.seated().map((p) => ({ id: p.id, role: p.role, seen: p.seen, align: p.align, f: p.f, alive: p.alive })),
-        log: s.log.slice(-200), bluffs: s.bluffs,
-      };
-    }
+    if (isST || end) v.grim = this.grimoire();
     return v;
+  }
+
+  grimoire() {
+    const s = this.s;
+    return {
+      players: this.seated().map((p) => ({ id: p.id, role: p.role, seen: p.seen, align: p.align, f: p.f, alive: p.alive })),
+      log: s.log.slice(-300), bluffs: s.bluffs,
+      events: (s.g.ev || []).map((e) => ({ ...e, name: (s.events.find((x) => x.id === e.id) || {}).name })),
+    };
   }
 }
