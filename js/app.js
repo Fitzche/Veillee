@@ -588,7 +588,7 @@ function effectEd(path, i, game) {
   else if (meta.v === 'tag') val = `<div class="row">${F('Étiquette', IN(path + '.v', { ph: 'ex. maudit', max: 30 }))}${e.type === 'tag' ? F('Visible par', SEL(path + '.vis', { secret: 'Personne', self: 'Le joueur marqué', public: 'Tout le monde' })) : ''}</div>`;
   else if (meta.v === 'camp') val = F('Nouveau camp', SEL(path + '.v', RU.CAMPS));
   else if (meta.v === 'role') val = F('Nouveau rôle', SEL(path + '.v', roleOpts(game, { '@chosen': '↪ le rôle choisi par l\'acteur' })));
-  else if (meta.v === 'winWho') val = F('Qui gagne', SEL(path + '.v', { solo: 'L\'acteur, seul', camp: 'Le camp de l\'acteur', good: 'Le Bien / le village', evil: 'Le Mal / les loups' }));
+  else if (meta.v === 'winWho') val = F('Qui gagne', SEL(path + '.v', { solo: 'L\'acteur, seul', camp: 'Le camp de l\'acteur', target: 'La cible, seule', targetCamp: 'Le camp de la cible', good: 'Le Bien / le village', evil: 'Le Mal / les loups' }));
   else if (meta.v === 'withRoles') val = F('Détail', SEL(path + '.v', { '': 'Les noms seulement', withRoles: 'Les noms et les rôles' }));
   const list = path.slice(0, path.lastIndexOf('.'));
   return `<div class="eff"><div class="row"><b class="grow">Effet ${i + 1}</b>

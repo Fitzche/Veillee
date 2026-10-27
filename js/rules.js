@@ -68,6 +68,7 @@ export const EFFECTS = {
   powersOff: { l: '🌑 Tous les pouvoirs bloqués jusqu\'au crépuscule', k: 'g' },
   win: { l: '🏆 Victoire immédiate', k: 'g', v: 'winWho' },
 };
+export const WIN_WHO = { solo: 'l\'acteur, seul', camp: 'le camp de l\'acteur', target: 'la cible, seule', targetCamp: 'le camp de la cible', good: 'le Bien / le village', evil: 'le Mal / les loups' };
 export const CAMPS = { good: 'Bien / Village', evil: 'Mal / Loups', wolf: 'Loup-Garou (LG)', solo: 'Solitaire' };
 export const WINS = {
   team: 'Avec son camp', lastAlive: 'Seul, s\'il est le dernier en vie', allTagged: 'Seul, quand tous les autres vivants portent une étiquette',
@@ -333,7 +334,9 @@ async function applyEffects(E, effects, targets, c) {
       if (!ok && targets.length) ok = targets.some((t) => test(E, eff.if, t, { ...c, target: t }));
       else if (!ok && c.actor) ok = test(E, eff.if, c.actor, c);
       else if (!ok) ok = eff.if.k === 'chance' && test(E, eff.if, { f: {} }, c);
-      if (ok) await effect(E, eff, null, c, targets);
+      // Les cibles qui remplissent la condition (toutes si « toujours ») : utiles à « faire gagner la cible ».
+      const matched = eff.if.k === 'always' ? targets : targets.filter((t) => test(E, eff.if, t, { ...c, target: t }));
+      if (ok) await effect(E, eff, null, { ...c, target: matched[0] || c.target }, matched.length ? matched : targets);
       continue;
     }
     const ts = targets.filter((t) => test(E, eff.if, t, c));
@@ -408,7 +411,12 @@ async function effect(E, eff, t, c, ts) {
     case 'powersOff': for (const x of E.seated()) x.f.blockUntil = Math.max(x.f.blockUntil || 0, s.clock + 2); break;
     case 'win': {
       if (!real) break;
-      if (eff.v === 'camp' && a) E.win(camp(E, a) === 'evil' ? 'evil' : camp(E, a), `${a.name} (${rn(a.role)}) fait gagner son camp !`);
+      if (eff.v === 'target' || eff.v === 'targetCamp') {
+        const w = ts.filter(Boolean);
+        if (!w.length) break;
+        if (eff.v === 'target') E.win('solo', `${w.map((x) => `${x.name} (${rn(x.role)})`).join(', ')} ${w.length > 1 ? 'gagnent' : 'gagne'} !`);
+        else { const cp = camp(E, w[0]); E.win(cp === 'evil' ? 'evil' : cp, `${w[0].name} (${rn(w[0].role)}) fait gagner son camp !`); }
+      } else if (eff.v === 'camp' && a) E.win(camp(E, a) === 'evil' ? 'evil' : camp(E, a), `${a.name} (${rn(a.role)}) fait gagner son camp !`);
       else if (eff.v === 'good' || eff.v === 'evil') E.win(eff.v, eff.v === 'good' ? 'Le Bien / le Village l\'emporte !' : 'Le Mal / les Loups l\'emportent !');
       else E.win('solo', a ? `${a.name} (${rn(a.role)}) gagne seul !` : 'Victoire !');
       break;
@@ -556,7 +564,7 @@ function targetText(t) {
 }
 function effectText(e) {
   let s = EFFECTS[e.type].l.replace(/^\S+\s/, '');
-  if (e.v && EFFECTS[e.type].v) s += e.type === 'setRole' ? ` (${e.v === '@chosen' ? 'rôle choisi' : rn(e.v)})` : e.type === 'convert' ? ` (${CAMPS[e.v] || e.v})` : e.type === 'win' ? '' : ` (${e.v})`;
+  if (e.v && EFFECTS[e.type].v) s += e.type === 'setRole' ? ` (${e.v === '@chosen' ? 'rôle choisi' : rn(e.v)})` : e.type === 'convert' ? ` (${CAMPS[e.v] || e.v})` : e.type === 'win' ? ` (${WIN_WHO[e.v] || WIN_WHO.solo})` : ` (${e.v})`;
   if (e.on === 'actor' && EFFECTS[e.type].k === 't') s = `l'acteur subit : ${s.toLowerCase()}`;
   const c = condText(e.if);
   return s + (c ? (EFFECTS[e.type].k === 'g' ? ` si au moins une cible ${c}` : ` si la cible ${c}`) : '');
