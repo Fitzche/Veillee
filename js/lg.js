@@ -181,6 +181,23 @@ function alignOf(p) {
 }
 
 // ---------- morts ----------
+/**
+ * Révélation des rôles à la mort : clair (tous), flou (seulement les morts de la journée :
+ * vote, tir du Chasseur, chagrin… — jamais les morts de la nuit ni de l'aube), obscur (aucun).
+ */
+export const REVEAL_MODES = {
+  clair: { l: '☀️ Clair', d: 'Le rôle de chaque mort est révélé.' },
+  flou: { l: '🌫️ Flou', d: 'Seuls les morts de la journée (vote, tir du Chasseur…) sont révélés ; les victimes de la nuit restent secrètes.' },
+  obscur: { l: '🌑 Obscur', d: 'Aucun rôle n\'est révélé à la mort : tout se joue sur la parole.' },
+};
+export function revealMode(o) { return REVEAL_MODES[o.revealMode] ? o.revealMode : o.revealOnDeath === false ? 'obscur' : 'clair'; }
+function revealsDeath(E) {
+  const m = revealMode(E.s.options);
+  if (m === 'clair') return true;
+  // La journée commence quand le jour s'ouvre (après les morts de l'aube et les événements du matin).
+  return m === 'flou' && E.s.cursor.phase === 'day' && !!E.s.dayState;
+}
+
 async function lgDie(E, p, cause) {
   if (!p || !p.alive) return;
   const s = E.s;
@@ -188,7 +205,7 @@ async function lgDie(E, p, cause) {
   if (p.f.lives > 0 && cause !== 'chagrin' && cause !== 'lien') { p.f.lives--; E.log(`${p.name} perd une vie supplémentaire.`); return; }
   p.alive = false;
   p.dead = { cause, day: s.day, night: s.night };
-  if (s.options.revealOnDeath && !p.f.hideRole) p.f.revealed = p.role;
+  if (revealsDeath(E) && !p.f.hideRole) p.f.revealed = p.role;
   E.pub(`💀 ${p.name} meurt${p.f.revealed ? ` — c'était ${rn(p.role)} ${getRole(p.role).icon}` : ''}.`, 'death');
   E.log(`${p.name} (${rn(p.role)}) meurt [${cause}]`);
   if (p.role === 'ancien' && ['vote', 'chasseur', 'sorciere'].includes(cause) && !s.g.noPowers) {

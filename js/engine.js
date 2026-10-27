@@ -13,7 +13,7 @@ export function newState(code, host) {
     roles: [],            // ids choisis (doublons possibles pour LG)
     custom: [],           // définitions de rôles sur mesure apportées par l'hôte
     events: [],           // événements sur mesure (chacun a sa probabilité d'apparaître)
-    options: { autoRoles: true, stValidates: true, revealOnDeath: true, captain: true, fakeActions: true, dayMinutes: 0, announceEvents: true },
+    options: { autoRoles: true, stValidates: true, revealMode: 'clair', captain: true, fakeActions: true, dayMinutes: 0, announceEvents: true },
     day: 0, night: 0, clock: 0,
     cursor: null, nightQ: [], nightI: 0, nd: {}, dayState: null,
     pub: [], log: [], prompts: {}, winner: null, bluffs: [], g: {},

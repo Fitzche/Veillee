@@ -253,3 +253,7 @@ select.inline { background: transparent; color: inherit; border: 1px solid var(-
 .bar-t { height: 10px; border-radius: 5px; background: var(--bg); overflow: hidden; }
 .bar-t i { display: block; height: 100%; background: linear-gradient(90deg, var(--gold2), var(--gold)); }
 pre.err { white-space: pre-wrap; font-size: .72rem; background: var(--bg); padding: 8px; border-radius: 8px; max-height: 160px; overflow: auto; color: var(--warn); }
+
+.optblock { padding: 8px 0; }
+.optblock > span { display: block; margin-bottom: 2px; }
+.optblock .hint { margin-top: 2px; }

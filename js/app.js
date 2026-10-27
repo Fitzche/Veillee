@@ -8,6 +8,7 @@ import { uid } from './util.js';
 import { VERSION } from './version.js';
 import * as RU from './rules.js';
 import { buildGame, batch, dayDriver } from './simcore.js';
+import { REVEAL_MODES, revealMode } from './lg.js';
 
 // ---------- stockage local ----------
 // ?profil=x isole un profil de test (plusieurs joueurs dans un même navigateur).
@@ -262,7 +263,7 @@ function renderLobby(v) {
       ${v.options.autoRoles ? `<p class="hint">${v.mode === 'botc' ? autoBotcHint(seated.length) : 'Loups, voyante et rôles spéciaux tirés au hasard dans les extensions choisies.'}</p>` : manualPicker(v, isHost, seated.length)}
       <h3>Options</h3>
       ${opt(v, isHost, 'stValidates', 'Le MJ valide chaque information avant envoi', !v.stId)}
-      ${v.mode === 'lg' ? opt(v, isHost, 'revealOnDeath', 'Révéler le rôle des morts') + opt(v, isHost, 'captain', 'Élire un Capitaine (voix double)') : ''}
+      ${v.mode === 'lg' ? revealPicker(v, isHost) + opt(v, isHost, 'captain', 'Élire un Capitaine (voix double)') : ''}
       ${v.events.length ? opt(v, isHost, 'announceEvents', 'Annoncer en début de partie les événements tirés') : ''}
       ${opt(v, isHost, 'fakeActions', 'Actions factices la nuit (personne ne se trahit en touchant son écran)')}
       <label class="optl"><span>Durée indicative des débats</span><select ${isHost ? 'data-in="dayMinutes"' : 'disabled'} id="dayMinutes">${[0, 2, 3, 5, 8, 10, 15].map((m) => `<option value="${m}" ${+v.options.dayMinutes === m ? 'selected' : ''}>${m ? m + ' min' : 'Libre'}</option>`).join('')}</select></label>
@@ -275,6 +276,13 @@ function autoBotcHint(n) {
   if (n < 5) return 'Il faut au moins 5 joueurs (hors MJ).';
   const D = { 5: [3, 0, 1, 1], 6: [3, 1, 1, 1], 7: [5, 0, 1, 1], 8: [5, 1, 1, 1], 9: [5, 2, 1, 1], 10: [7, 0, 2, 1], 11: [7, 1, 2, 1], 12: [7, 2, 2, 1], 13: [9, 0, 3, 1], 14: [9, 1, 3, 1], 15: [9, 2, 3, 1] }[Math.min(n, 15)];
   return `${n} joueurs : ${D[0]} Villageois, ${D[1]} Étranger(s), ${D[2]} Sbire(s), ${D[3]} Démon (ajusté par le Baron, etc.).`;
+}
+
+function revealPicker(v, isHost) {
+  const m = revealMode(v.options);
+  return `<div class="optblock"><span>Rôles des morts</span>
+    <div class="seg small">${Object.entries(REVEAL_MODES).map(([k, x]) => `<button class="${m === k ? 'on' : ''}" ${isHost ? `data-act="lobby" data-k="reveal" data-v="${k}"` : 'disabled'}>${x.l}</button>`).join('')}</div>
+    <p class="hint">${esc(REVEAL_MODES[m].d)}</p></div>`;
 }
 
 function opt(v, isHost, k, label, disabled) {
@@ -330,6 +338,7 @@ function lobbyEdit(k, val) {
       break;
     }
     case 'auto': o.autoRoles = val === '1'; break;
+    case 'reveal': if (REVEAL_MODES[val]) { o.revealMode = val; delete o.revealOnDeath; } break;
     case 'opt': o[val] = !o[val]; break;
     case 'st': s.stId = s.stId === val ? null : val; break;
     case 'kick': { const c = host.conns.get(val); if (c) { host.net.send(c, { t: 'kick' }); host.conns.delete(val); } s.players = s.players.filter((p) => p.id !== val); if (s.stId === val) s.stId = null; break; }
@@ -710,7 +719,7 @@ function libSave(kind, d) {
 
 // ----- laboratoire -----
 function labCfg() {
-  if (!ui.labCfg) ui.labCfg = { mode: 'lg', n: 7, seats: [], editions: ['tb', 'bmr', 'snv'], lgEditions: ['base', 'nl', 'perso'], useCustom: true, events: [], force100: true, count: 100 };
+  if (!ui.labCfg) ui.labCfg = { mode: 'lg', n: 7, seats: [], editions: ['tb', 'bmr', 'snv'], lgEditions: ['base', 'nl', 'perso'], useCustom: true, events: [], force100: true, count: 100, revealMode: 'clair' };
   return ui.labCfg;
 }
 
@@ -727,6 +736,7 @@ function renderLabSetup() {
       <div class="seg">${Object.values(MODES).map((m) => `<button class="${c.mode === m.id ? 'on' : ''}" data-act="labSet" data-k="mode" data-v="${m.id}">${m.id === 'lg' ? '🐺' : '🩸'} ${esc(m.name)}</button>`).join('')}</div>
       <div class="chips">${M.editions.map((e) => `<button class="chip ${c[key].includes(e.id) ? 'on' : ''}" data-act="labSet" data-k="ed" data-v="${e.id}">${esc(e.name)}</button>`).join('')}</div>
       <label class="optl"><span>Nombre de joueurs</span><select data-lab="n" class="inp narrow">${Array.from({ length: 18 }, (_, i) => i + 3).map((n) => `<option ${n === c.n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      ${c.mode === 'lg' ? `<label class="optl"><span>Rôles des morts</span><select data-lab="revealMode" class="inp narrow">${Object.entries(REVEAL_MODES).map(([k, x]) => `<option value="${k}" ${(c.revealMode || 'clair') === k ? 'selected' : ''}>${x.l}</option>`).join('')}</select></label>` : ''}
       <label class="optl"><span>Mes rôles sur mesure dans le tirage au hasard</span><input type="checkbox" data-lab="useCustom" ${c.useCustom ? 'checked' : ''}></label>
     </section>
     <section class="card"><h3>Sièges</h3><p class="hint">Laisse « au hasard » pour un tirage normal. Si tu imposes certains rôles, les sièges libres reçoivent des rôles simples.</p>
@@ -764,7 +774,7 @@ function labConfig() {
     if (c.mode === 'lg' && !roles.some((id) => getRole(id)?.wolf)) roles[roles.lastIndexOf('villageois') >= 0 ? roles.lastIndexOf('villageois') : c.n - 1] = 'loup_garou';
     if (c.mode === 'botc' && !roles.some((id) => getRole(id)?.team === 'demon')) roles[roles.findIndex((x, i) => !seats[i]) >= 0 ? roles.findIndex((x, i) => !seats[i]) : c.n - 1] = 'imp';
   }
-  return { mode: c.mode, n: c.n, custom, events, roles, editions: c.editions, lgEditions: c.lgEditions, names: Array.from({ length: c.n }, (_, i) => `Joueur ${i + 1}`) };
+  return { mode: c.mode, n: c.n, custom, events, roles, editions: c.editions, lgEditions: c.lgEditions, options: { revealMode: c.revealMode || 'clair' }, names: Array.from({ length: c.n }, (_, i) => `Joueur ${i + 1}`) };
 }
 
 function labStart() {

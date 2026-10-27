@@ -9,6 +9,8 @@ Un joueur crée la partie, les autres entrent le code à 5 lettres. Marche aussi
 - **Toutes les décisions sur son propre téléphone** : actions de nuit, votes, nominations, pouvoirs de jour.
 - **Rôles** : BotC Trouble Brewing, Bad Moon Rising, Sects & Violets (72 personnages) ;
   Loups-Garous jeu de base, Nouvelle Lune, Personnages & Village (31 rôles).
+- **Modes de révélation (Loups-Garous)** : clair (le rôle de chaque mort est révélé), flou (seulement
+  les morts de la journée : vote, tir du Chasseur…), obscur (aucun rôle révélé). Tout est dévoilé en fin de partie.
 - **Atelier — rôles sur mesure** : un rôle combine des particularités (immunités, vies, poids de la voix,
   camp apparent…) et jusqu'à 8 capacités. Chaque capacité a un déclencheur (nuit, bouton de jour, chaque matin,
   à sa mort, à la mort d'un autre, quand le village l'élimine), des conditions (utilisations, repos, chance,
